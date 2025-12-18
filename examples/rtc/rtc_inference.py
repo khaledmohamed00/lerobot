@@ -8,62 +8,50 @@ import numpy as np
 import torch
 
 from lerobot.configs import parser
-from lerobot.configs.default import DatasetConfig
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import RTCAttentionSchedule
 from lerobot.datasets.factory import resolve_delta_timestamps
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 from lerobot.policies.rtc.configuration_rtc import RTCConfig
-from lerobot.policies.rtc.debug_visualizer import RTCDebugVisualizer
 from lerobot.utils.hub import HubMixin
-from lerobot.utils.utils import init_logging
 
 @dataclass
-class RTCEvalConfig(HubMixin):
-    """Configuration for RTC evaluation."""
+class RTCDemoConfig(HubMixin):
+    """Configuration for RTC demo with action chunking policies and real robots."""
 
     # Policy configuration
     policy: PreTrainedConfig | None = None
 
-    # Dataset configuration
-    #dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    # # Robot configuration
+    # robot: RobotConfig | None = None
 
     # RTC configuration
     rtc: RTCConfig = field(
         default_factory=lambda: RTCConfig(
-            enabled=True,
-            execution_horizon=20,
-            max_guidance_weight=10.0,
+            execution_horizon=10,
+            max_guidance_weight=1.0,
             prefix_attention_schedule=RTCAttentionSchedule.EXP,
-            debug=True,
-            debug_maxlen=1000,
         )
     )
 
-    # Device configuration
-    device: str | None = field(
-        default=None,
-        metadata={"help": "Device to run on (cuda, cpu, mps, auto)"},
-    )
+    # Demo parameters
+    duration: float = 30.0  # Duration to run the demo (seconds)
+    fps: float = 10.0  # Action execution frequency (Hz)
 
-    # Output configuration
-    output_dir: str = field(
-        default="rtc_debug_output",
-        metadata={"help": "Directory to save debug visualizations"},
-    )
+    # Compute device
+    device: str | None = None  # Device to run on (cuda, cpu, auto)
 
-    # Seed configuration
-    seed: int = field(
-        default=42,
-        metadata={"help": "Random seed for reproducibility"},
-    )
+    # Get new actions horizon. The amount of executed steps after which will be requested new actions.
+    # It should be higher than inference delay + execution horizon.
+    action_queue_size_to_get_new_actions: int = 30
 
+    # Task to execute
+    task: str = field(default="", metadata={"help": "Task to execute"})
     inference_delay: int = field(
         default=4,
         metadata={"help": "Inference delay for RTC"},
     )
-
     # Torch compile configuration
     use_torch_compile: bool = field(
         default=False,
@@ -98,6 +86,9 @@ class RTCEvalConfig(HubMixin):
         else:
             raise ValueError("Policy path is required")
 
+        # Validate that robot configuration is provided
+        # if self.robot is None:
+        #     raise ValueError("Robot configuration must be provided")
 
     @classmethod
     def __get_path_fields__(cls) -> list[str]:
@@ -105,9 +96,9 @@ class RTCEvalConfig(HubMixin):
         return ["policy"]
 
 
-class pi0_inference:
+class PI0_INFERENCE:
     def __init__(self, 
-                 cfg: RTCEvalConfig | None = None,
+                 cfg: RTCDemoConfig | None = None,
                  ):
 
         self.cfg = cfg
@@ -232,8 +223,8 @@ class pi0_inference:
             print("Predicted actions shape:", actions.shape)
 
 @parser.wrap()
-def main(cfg: RTCEvalConfig):
-    pi0_inf = pi0_inference(cfg=cfg)
+def main(cfg: RTCDemoConfig):
+    pi0_inf = PI0_INFERENCE(cfg=cfg)
     pi0_inf.run_inference()
 
 if __name__ == "__main__":
