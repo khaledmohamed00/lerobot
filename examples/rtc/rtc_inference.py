@@ -88,33 +88,42 @@ class RTCEvalConfig(HubMixin):
         },
     )
 
+    def __post_init__(self):
+        # HACK: We parse again the cli args here to get the pretrained path if there was one.
+        policy_path = parser.get_path_arg("policy")
+        if policy_path:
+            cli_overrides = parser.get_cli_overrides("policy")
+            self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
+            self.policy.pretrained_path = policy_path
+        else:
+            raise ValueError("Policy path is required")
+
+
+    @classmethod
+    def __get_path_fields__(cls) -> list[str]:
+        """This enables the parser to load config from the policy using `--policy.path=local/dir`"""
+        return ["policy"]
+
 
 class pi0_inference:
-    def __init__(self, pretrained_policy_path: str,
-                 rtc_enabled: bool =  True,
-                 execution_horizon: int = 10,
-                 inference_delay: int = 4,
-                 max_guidance_weight: float = 10.0,
-                 rtc_debug: bool = False,
-                 device: str | None = "auto",
-                 attention_schedule: str = "exp",
-                 use_torch_compile: bool = False,
+    def __init__(self, 
+                 cfg: RTCEvalConfig | None = None,
                  ):
 
-        self.pretrained_policy_path = pretrained_policy_path
-        self.rtc_enabled = rtc_enabled
-        self.inference_delay = inference_delay
-        self.execution_horizon = execution_horizon
-        self.device = device
+        self.cfg = cfg
+        self.pretrained_policy_path = self.cfg.policy.pretrained_path if cfg else None
+        self.rtc_enabled = self.cfg.rtc.enabled if cfg else True
+        self.inference_delay = self.cfg.inference_delay if cfg else 4
+        self.execution_horizon = self.cfg.rtc.execution_horizon if cfg else 20
+        self.device = self.cfg.device if cfg else "auto"
         self.prev_chunk_left_over = None
-
-        if attention_schedule.lower() == "exp":
+        if self.cfg.rtc.prefix_attention_schedule.lower() == "exp":
             self.attention_schedule = RTCAttentionSchedule.EXP
-        elif attention_schedule.lower() == "linear":
+        elif self.cfg.rtc.prefix_attention_schedule.lower() == "linear":
             self.attention_schedule = RTCAttentionSchedule.LINEAR
         else:
-            raise ValueError(f"Unknown attention schedule: {attention_schedule}")
-        
+            raise ValueError(f"Unknown attention schedule: {self.cfg.rtc.prefix_attention_schedule}")
+
         # Auto-detect device if not specified
         if self.device is None or self.device == "auto":
             if torch.cuda.is_available():
@@ -123,25 +132,14 @@ class pi0_inference:
                 self.device = "mps"
             else:
                 self.device = "cpu"
-        
-        policy_cfg = PreTrainedConfig.from_pretrained(self.pretrained_policy_path)
-        policy_cfg.pretrained_path = self.pretrained_policy_path
-        self.cfg = RTCEvalConfig(
-            policy=policy_cfg,
-            use_torch_compile=use_torch_compile,
-            #dataset=DatasetConfig(),
-            rtc=RTCConfig(
-                enabled=self.rtc_enabled,
-                execution_horizon=self.execution_horizon,
-                max_guidance_weight=max_guidance_weight,
-                prefix_attention_schedule=self.attention_schedule,
-                debug=rtc_debug,
-            ),
-            device=self.device,
-        )
-        
+        self.cfg.device = self.device
+        self.cfg.policy.device = self.device
+
         self.policy = self._init_policy("Policy")
-        
+        # Turn on RTC
+        self.policy.config.rtc_config = self.cfg.rtc
+        self.policy.init_rtc_processor()
+
         # Create preprocessor/postprocessor
         self.preprocessor, self.postprocessor = make_pre_post_processors(
             policy_cfg=self.cfg.policy,
@@ -164,134 +162,19 @@ class pi0_inference:
 
         # Load policy from pretrained
         policy_class = get_policy_class(self.cfg.policy.type)
-
-        config = PreTrainedConfig.from_pretrained(self.cfg.policy.pretrained_path)
-
-        if self.cfg.policy.type == "pi05" or self.cfg.policy.type == "pi0":
-            config.compile_model = self.cfg.use_torch_compile
-
-        policy = policy_class.from_pretrained(self.cfg.policy.pretrained_path, config=config)
+        self.cfg.policy.compile_model = self.cfg.use_torch_compile
+        policy = policy_class.from_pretrained(self.cfg.policy.pretrained_path, config=self.cfg.policy)
         policy = policy.to(self.device)
         policy.eval()
 
-        # Configure RTC
-        rtc_config = RTCConfig(
-            enabled=self.cfg.rtc.enabled,
-            execution_horizon=self.cfg.rtc.execution_horizon,
-            max_guidance_weight=self.cfg.rtc.max_guidance_weight,
-            prefix_attention_schedule=self.cfg.rtc.prefix_attention_schedule,
-            debug=self.cfg.rtc.debug,
-            debug_maxlen=self.cfg.rtc.debug_maxlen,
-        )
-        policy.config.rtc_config = rtc_config
         policy.init_rtc_processor()
 
         logging.info(f"  RTC enabled: {self.cfg.rtc.enabled}")
         logging.info(f"  RTC debug: {self.cfg.rtc.debug}")
-        logging.info(f"  Policy config: {config}")
-
-        # Apply torch.compile to predict_action_chunk method if enabled
-        if self.cfg.use_torch_compile:
-            policy = self._apply_torch_compile(policy, name)
+        logging.info(f"  Policy config: {self.cfg.policy}")
 
         logging.info(f"✓ {name} initialized successfully")
-
-        # Apply torch.compile to predict_action_chunk method if enabled
-        if self.cfg.use_torch_compile:
-            policy = self._apply_torch_compile(policy, name)
-
-        logging.info(f"✓ {name} initialized successfully")
-        return policy
-
-    def _apply_torch_compile(self, policy, policy_name: str):
-        """Apply torch.compile to the policy's predict_action_chunk method.
-
-        Args:
-            policy: Policy instance to compile
-            policy_name: Name for logging purposes
-
-        Returns:
-            Policy with compiled predict_action_chunk method
-        """
-
-        # PI models handle their own compilation
-        if policy.type == "pi05" or policy.type == "pi0":
-            return policy
-
-        try:
-            # Check if torch.compile is available (PyTorch 2.0+)
-            if not hasattr(torch, "compile"):
-                logging.warning(
-                    f"  [{policy_name}] torch.compile is not available. Requires PyTorch 2.0+. "
-                    f"Current version: {torch.__version__}. Skipping compilation."
-                )
-                return policy
-
-            logging.info(f"  [{policy_name}] Applying torch.compile to predict_action_chunk...")
-            logging.info(f"    Backend: {self.cfg.torch_compile_backend}")
-            logging.info(f"    Mode: {self.cfg.torch_compile_mode}")
-            logging.info(f"    Disable CUDA graphs: {self.cfg.torch_compile_disable_cudagraphs}")
-            logging.info("    Note: Debug tracker excluded from compilation via @torch._dynamo.disable")
-
-            # Compile the predict_action_chunk method
-            # - Debug tracker is excluded from compilation via @torch._dynamo.disable
-            # - CUDA graphs disabled to prevent tensor aliasing from in-place ops (x_t += dt * v_t)
-            compile_kwargs = {
-                "backend": self.cfg.torch_compile_backend,
-                "mode": self.cfg.torch_compile_mode,
-            }
-
-            # Disable CUDA graphs if requested (prevents tensor aliasing issues)
-            if self.cfg.torch_compile_disable_cudagraphs:
-                compile_kwargs["options"] = {"triton.cudagraphs": False}
-
-            original_method = policy.predict_action_chunk
-            compiled_method = torch.compile(original_method, **compile_kwargs)
-            policy.predict_action_chunk = compiled_method
-            logging.info(f"  ✓ [{policy_name}] Successfully compiled predict_action_chunk")
-
-        except Exception as e:
-            logging.error(f"  [{policy_name}] Failed to apply torch.compile: {e}")
-            logging.warning(f"  [{policy_name}] Continuing without torch.compile")
-
-        return policy
-
-    def _destroy_policy(self, policy, policy_name: str):
-        """Explicitly destroy a policy and free all associated memory.
-
-        This method performs aggressive cleanup to ensure maximum memory is freed,
-        which is critical for large models (e.g., VLAs with billions of parameters).
-
-        Args:
-            policy: Policy instance to destroy
-            policy_name: Name for logging purposes
-        """
-        logging.info(f"  Destroying {policy_name} and freeing memory...")
-
-        try:
-            # Step 1: Move policy to CPU to free GPU/MPS memory
-            policy.cpu()
-
-            # Step 2: Delete the policy object
-            del policy
-
-            # Step 3: Force garbage collection to reclaim memory immediately
-            gc.collect()
-
-            # Step 4: Clear device-specific caches
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()  # Ensure all operations complete
-
-            if torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-
-            logging.info(f"  ✓ {policy_name} destroyed and memory freed")
-
-        except Exception as e:
-            logging.warning(f"  Warning: Error during {policy_name} cleanup: {e}")
-
-
+        
         return policy
 
     def get_actions(self, obs):
@@ -345,21 +228,16 @@ class pi0_inference:
 
             preprocessed_obs = self.preprocessor(obs)
 
-            actions = pi0_inf.get_actions(preprocessed_obs)
+            actions = self.get_actions(preprocessed_obs)
             print("Predicted actions shape:", actions.shape)
 
-if __name__ == "__main__":
-    pretrained_policy_path = "/home/gamal/pi0_fintuned/pi0_droid_pytorch_29999"
-    pi0_inf = pi0_inference(
-        pretrained_policy_path=pretrained_policy_path,
-        rtc_enabled=True,
-        execution_horizon=10,
-        inference_delay=4,
-        max_guidance_weight=10.0,
-        rtc_debug=True,
-        device="auto",
-        attention_schedule="exp",
-        use_torch_compile=False,
-    )
-    
+@parser.wrap()
+def main(cfg: RTCEvalConfig):
+    pi0_inf = pi0_inference(cfg=cfg)
     pi0_inf.run_inference()
+
+if __name__ == "__main__":
+    # pretrained_policy_path = "/home/gamal/pi0_fintuned/pi0_droid_pytorch_29999"
+    #--policy.path="/home/gamal/pi0_fintuned/pi0_droid_pytorch_29999" \
+
+    main()

@@ -177,3 +177,5 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+rtc_debug_output/*
