@@ -29,6 +29,7 @@ class RTCDemoConfig(HubMixin):
     # RTC configuration
     rtc: RTCConfig = field(
         default_factory=lambda: RTCConfig(
+            enabled=True,
             execution_horizon=10,
             max_guidance_weight=1.0,
             prefix_attention_schedule=RTCAttentionSchedule.EXP,
@@ -36,7 +37,7 @@ class RTCDemoConfig(HubMixin):
     )
 
     # Demo parameters
-    duration: float = 30.0  # Duration to run the demo (seconds)
+    duration: float = 300.0  # Duration to run the demo (seconds)
     fps: float = 10.0  # Action execution frequency (Hz)
 
     # Compute device
@@ -44,14 +45,20 @@ class RTCDemoConfig(HubMixin):
 
     # Get new actions horizon. The amount of executed steps after which will be requested new actions.
     # It should be higher than inference delay + execution horizon.
-    action_queue_size_to_get_new_actions: int = 30
+    action_queue_size_to_get_new_actions: int = field(
+        default=36,
+        metadata={"help": "Number of actions to execute before requesting new actions"})
 
+    horizon : int = field(default=50, metadata={"help": "Action Chunk size"})
     # Task to execute
     task: str = field(default="", metadata={"help": "Task to execute"})
     inference_delay: int = field(
         default=4,
         metadata={"help": "Inference delay for RTC"},
     )
+
+
+
     # Torch compile configuration
     use_torch_compile: bool = field(
         default=False,
@@ -85,6 +92,7 @@ class RTCDemoConfig(HubMixin):
             self.policy.pretrained_path = policy_path
         else:
             raise ValueError("Policy path is required")
+        self.action_queue_size_to_get_new_actions: int = self.horizon - (self.rtc.execution_horizon + self.inference_delay)
 
         # Validate that robot configuration is provided
         # if self.robot is None:
