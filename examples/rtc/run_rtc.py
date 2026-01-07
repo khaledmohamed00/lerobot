@@ -3,17 +3,13 @@ import math
 import sys
 import time
 import traceback
-from dataclasses import dataclass, field
-from threading import Event, Lock, Thread
+from threading import Event, Thread
 from typing import Dict
-
-import torch
-from torch import Tensor
+import os
+from pathlib import Path
 
 from lerobot.configs import parser
 from lerobot.configs.policies import PreTrainedConfig
-from lerobot.datasets.factory import resolve_delta_timestamps
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 from lerobot.policies.rtc.action_queue import ActionQueue
 from lerobot.policies.rtc.latency_tracker import LatencyTracker
@@ -21,9 +17,21 @@ from lerobot.rl.process import ProcessSignalHandler
 from lerobot.utils.constants import OBS_IMAGES
 from lerobot.utils.utils import init_logging
 
-# add path to python sys.path for lerobot package
-sys.path.append("/home/gamal/repos/lerobot/examples/rtc")
+
+# File location
+current_file = Path(__file__).resolve()
+# repo_root = parent of parent
+repo_root = current_file.parents[2]
+# Path you actually want to import from
+rtc_examples_path = repo_root / "examples" / "rtc"
+# Add once
+if rtc_examples_path not in map(Path, sys.path):
+    sys.path.append(str(rtc_examples_path))
+
 from rtc_inference import RTCDemoConfig  # noqa: E402
+from robot_interface import RobotWrapper  # noqa: E402
+from robot import Robot_simulation  # noqa: E402
+from rtc_inference import PI0_INFERENCE
 
 # ---------------------------------------------------------------------
 # Logging setup
@@ -45,80 +53,6 @@ def log_rtc_step(tag: str, **kwargs):
     rtc_logger.info(f"[RTC] {tag:<10s} | {parts}")
 
 
-# ---------------------------------------------------------------------
-# Simulation robot backed by a dataset
-# ---------------------------------------------------------------------
-class Robot_simulation:
-    def __init__(self, dataset_repo_id: str = "HuggingFaceVLA/libero", batch_size: int = 1):
-        self.dataset_repo_id = dataset_repo_id
-
-        ds_meta = LeRobotDatasetMetadata(dataset_repo_id)
-        # If you want correct delta timestamps, uncomment this once cfg.policy is available
-        # delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
-
-        self.dataset = LeRobotDataset(
-            dataset_repo_id,
-            # delta_timestamps=delta_timestamps,
-        )
-        self.data_loader = torch.utils.data.DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
-        self.loader_iter = iter(self.data_loader)
-
-        # NOTE: These are placeholders. If your pipeline expects real names, set them properly.
-        self.observation_features = []
-        self.action_features = []
-
-        rtc_logger.debug(f"[SIM] Dataset simulation initialized | repo_id={dataset_repo_id}")
-
-    def get_observation(self) -> Dict[str, Tensor]:
-        try:
-            obs = next(self.loader_iter)
-        except StopIteration:
-            self.loader_iter = iter(self.data_loader)
-            obs = next(self.loader_iter)
-
-        rtc_logger.debug(f"[SIM] Observation fetched | keys={list(obs.keys())}")
-        return obs
-
-    def send_action(self, action: Tensor, fps: float = 30.0):
-        # logger fps
-        sleep_time = 1.0 / float(fps)
-        rtc_logger.debug(
-            f"[SIM] Action received | shape={tuple(action.shape)} | max={action.abs().max().item():.4f} | sleep={sleep_time:.4f}"
-        )
-        time.sleep(sleep_time)
-
-
-class RobotWrapper:
-    """
-    Thread-safe wrapper. If robot=None => use simulation and skip locking overhead if desired.
-    """
-
-    def __init__(self, robot=None, simulate_fps: float = 30.0):
-        self.robot = robot if robot is not None else Robot_simulation()
-        self.simulate_fps = simulate_fps
-        # Keep real Lock; avoid the "lock=True" bug.
-        self.lock = Lock()
-        self.is_sim = robot is None
-
-    def get_observation(self) -> Dict[str, Tensor]:
-        with self.lock:
-            return self.robot.get_observation()
-
-    def send_action(self, action: Tensor):
-        with self.lock:
-            if self.is_sim:
-                return self.robot.send_action(action, fps=self.simulate_fps)
-            return self.robot.send_action(action)
-
-    def observation_features(self):
-        with self.lock:
-            return getattr(self.robot, "observation_features", [])
-
-    def action_features(self):
-        with self.lock:
-            return getattr(self.robot, "action_features", [])
-
-
 def is_image_key(k: str) -> bool:
     return k.startswith(OBS_IMAGES)
 
@@ -127,7 +61,7 @@ def is_image_key(k: str) -> bool:
 # Thread: get action chunks from policy
 # ---------------------------------------------------------------------
 def get_actions(
-    policy,
+    policy: PI0_INFERENCE,
     robot: RobotWrapper,
     action_queue: ActionQueue,
     shutdown_event: Event,
@@ -141,15 +75,6 @@ def get_actions(
         time_per_tick = 1.0 / float(fps)
 
         logger.info(f"[GET_ACTIONS] Loading preprocessor/postprocessor from {cfg.policy.pretrained_path}")
-        preprocessor, postprocessor = make_pre_post_processors(
-            policy_cfg=cfg.policy,
-            pretrained_path=cfg.policy.pretrained_path,
-            dataset_stats=None,  # loads embedded stats from processor files
-            preprocessor_overrides={
-                "device_processor": {"device": cfg.policy.device},
-            },
-        )
-        logger.info("[GET_ACTIONS] Preprocessor/postprocessor loaded (embedded stats)")
 
         get_actions_threshold = cfg.action_queue_size_to_get_new_actions
         # print get_actions_threshold for debugging in logger
@@ -189,21 +114,12 @@ def get_actions(
 
                 # --- get obs and preprocess
                 obs = robot.get_observation()
-                preprocessed_obs = preprocessor(obs)
+                rtc_logger.debug(f"[SIM] Observation fetched | keys={list(obs.keys())}")
 
-                # --- policy inference WITH RTC
-                actions = policy.predict_action_chunk(
-                    preprocessed_obs,
-                    inference_delay=inference_delay,
+                postprocessed_actions, original_actions = policy.get_actions(
+                    obs,
                     prev_chunk_left_over=prev_actions,
                 )
-
-                # store original actions (before postproc) for RTC stitching
-                original_actions = actions.squeeze(0).clone()
-
-                # postprocess to robot action space
-                postprocessed_actions = postprocessor(actions).squeeze(0)
-
                 # --- latency update
                 new_latency = time.perf_counter() - t0
                 new_delay = int(math.ceil(new_latency / time_per_tick))
@@ -269,6 +185,10 @@ def actor_control(
             if action is not None:
                 action_cpu = action.cpu()
                 robot.send_action(action_cpu)
+                sleep_time = 1.0 / float(cfg.fps)
+                rtc_logger.debug(
+                    f"[SIM] Action received | shape={tuple(action.shape)} | max={action.abs().max().item():.4f} | sleep={sleep_time:.4f}"
+                )
                 action_count += 1
 
                 # Log “truth”: what got executed
@@ -302,35 +222,21 @@ def demo_cli(cfg: RTCDemoConfig):
     logger.info(f"[MAIN] RTC enabled: {cfg.rtc.enabled}")
     logger.info(f"[MAIN] FPS: {cfg.fps}")
     logger.info(f"[MAIN] Duration: {cfg.duration}s")
-
+    logger.info(f"[MAIN] Execution horizon: {cfg.rtc.execution_horizon} steps")
+    logger.info(f"[MAIN] Inference delay: {cfg.inference_delay} steps")
     # graceful shutdown
     signal_handler = ProcessSignalHandler(use_threads=True, display_pid=False)
     shutdown_event = signal_handler.shutdown_event
 
     # policy
-    policy_class = get_policy_class(cfg.policy.type)
-    config = PreTrainedConfig.from_pretrained(cfg.policy.pretrained_path)
+    policy = PI0_INFERENCE(cfg=cfg)
+    assert policy.policy.name in ["smolvla", "pi05", "pi0"], "Only smolvla, pi05, and pi0 are supported for RTC"
 
-    if cfg.policy.type in ("pi05", "pi0"):
-        config.compile_model = cfg.use_torch_compile
-
-    logger.info("[MAIN] Loading policy from pretrained")
-    policy = policy_class.from_pretrained(cfg.policy.pretrained_path, config=config)
-
-    # enable RTC
-    policy.config.rtc_config = cfg.rtc
-    policy.init_rtc_processor()
-
-    assert policy.name in ["smolvla", "pi05", "pi0"], "Only smolvla, pi05, and pi0 are supported for RTC"
-
-    policy = policy.to(cfg.device)
-    policy.eval()
-    logger.info(f"[MAIN] Policy ready | name={policy.name}")
-
-    # robot (simulation)
-    robot_wrapper = RobotWrapper(None, simulate_fps=cfg.fps)
+    logger.info(f"[MAIN] Policy ready | name={policy.policy.name}")
+    robot = Robot_simulation(fps=cfg.fps)
+    logger.info("[MAIN] Robot simulation initialized")
+    robot_wrapper = RobotWrapper(robot)
     logger.info("[MAIN] Robot simulation wrapper ready")
-
     # action queue
     action_queue = ActionQueue(cfg.rtc)
 

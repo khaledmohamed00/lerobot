@@ -3,7 +3,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-
+from typing import Tuple
 import numpy as np
 import torch
 
@@ -115,7 +115,6 @@ class PI0_INFERENCE:
         self.inference_delay = self.cfg.inference_delay if cfg else 4
         self.execution_horizon = self.cfg.rtc.execution_horizon if cfg else 20
         self.device = self.cfg.device if cfg else "auto"
-        self.prev_chunk_left_over = None
         if self.cfg.rtc.prefix_attention_schedule.lower() == "exp":
             self.attention_schedule = RTCAttentionSchedule.EXP
         elif self.cfg.rtc.prefix_attention_schedule.lower() == "linear":
@@ -176,7 +175,7 @@ class PI0_INFERENCE:
         
         return policy
 
-    def get_actions(self, obs):
+    def get_actions(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run inference with RTC enabled policy.
 
         Args:
@@ -185,17 +184,19 @@ class PI0_INFERENCE:
         Returns:
             Actions predicted by the policy
         """
+
         with torch.no_grad():
+            preprocessed_obs = self.preprocessor(obs)
             if self.rtc_enabled:
-                actions = self.policy.predict_action_chunk(
-                    obs,
+                original_actions = self.policy.predict_action_chunk(
+                    preprocessed_obs,
                     inference_delay=self.inference_delay,
-                    prev_chunk_left_over=self.prev_chunk_left_over,
+                    prev_chunk_left_over=prev_chunk_left_over,
                 )
-                self.prev_chunk_left_over = actions[:,self.execution_horizon:,:]
             else:
-                actions = self.policy.predict_action_chunk(obs)
-        return actions
+                original_actions = self.policy.predict_action_chunk(preprocessed_obs)
+            actions = self.postprocessor(original_actions).squeeze(0)
+        return actions, original_actions.squeeze(0)
     
     def run_inference(self):
         """Run inference with RTC enabled policy.
@@ -224,10 +225,21 @@ class PI0_INFERENCE:
                 obs = next(loader_iter)
             except StopIteration:
                 break
+            # observations preprocessing
+            # obs keys    <list of keys>
+            #['observation.images.image', # torch.Size([1, 3, 256, 256]) 
+            # 'observation.images.image2', # torch.Size([1, 3, 256, 256])
+            # 'observation.state', # torch.Size([1, 8])
+            # 'action', # torch.Size([1, 50, 7])
+            # 'timestamp', # torch.Size([1])
+            # 'frame_index', # torch.Size([1])
+            # 'episode_index', # torch.Size([1])
+            # 'index', # torch.Size([1])
+            # 'task_index', # torch.Size([1])
+            # 'action_is_pad', # torch.Size([1, 50])  # bool
+            # 'task'] # ["string"]
 
-            preprocessed_obs = self.preprocessor(obs)
-
-            actions = self.get_actions(preprocessed_obs)
+            actions = self.get_actions(obs)
             print("Predicted actions shape:", actions.shape)
 
 @parser.wrap()
