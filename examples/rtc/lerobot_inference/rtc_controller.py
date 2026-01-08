@@ -13,18 +13,10 @@ from lerobot.rl.process import ProcessSignalHandler
 from lerobot.utils.constants import OBS_IMAGES
 from lerobot.utils.utils import init_logging
 
-
-# File location
-current_file = Path(__file__).resolve()
-# repo_root = parent of parent
-repo_root = current_file.parents[3]
-if repo_root not in map(Path, sys.path):
-    sys.path.append(str(repo_root))
-
-from examples.rtc.lerobot_inference.lerobot_policy import RTCDemoConfig  # noqa: E402
-from examples.rtc.lerobot_inference.robot_interface import RobotWrapper  # noqa: E402
-from examples.rtc.lerobot_inference.robot import Robot_simulation  # noqa: E402
-from examples.rtc.lerobot_inference.lerobot_policy import LeRobotPolicy
+from .lerobot_policy import RTCDemoConfig  # noqa: E402
+from .robot_interface import RobotWrapper  # noqa: E402
+from .robot import Robot_simulation  # noqa: E402
+from .lerobot_policy import LeRobotPolicy
 
 # ---------------------------------------------------------------------
 # Logging setup

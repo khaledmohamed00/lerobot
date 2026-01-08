@@ -7,14 +7,7 @@ import os
 from pathlib import Path
 import sys
 
-# File location
-current_file = Path(__file__).resolve()
-# repo_root = parent of parent
-repo_root = current_file.parents[3]
-if repo_root not in map(Path, sys.path):
-    sys.path.append(str(repo_root))
-
-from examples.rtc.lerobot_inference.robot_interface import RobotInterface
+from .robot_interface import RobotInterface
 # ---------------------------------------------------------------------
 # Simulation robot backed by a dataset
 # ---------------------------------------------------------------------
