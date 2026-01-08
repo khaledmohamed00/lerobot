@@ -10,14 +10,11 @@ import sys
 # File location
 current_file = Path(__file__).resolve()
 # repo_root = parent of parent
-repo_root = current_file.parents[2]
-# Path you actually want to import from
-rtc_examples_path = repo_root / "examples" / "rtc"
-# Add once
-if rtc_examples_path not in map(Path, sys.path):
-    sys.path.append(str(rtc_examples_path))
+repo_root = current_file.parents[3]
+if repo_root not in map(Path, sys.path):
+    sys.path.append(str(repo_root))
 
-from robot_interface import RobotInterface
+from examples.rtc.lerobot_inference.robot_interface import RobotInterface
 # ---------------------------------------------------------------------
 # Simulation robot backed by a dataset
 # ---------------------------------------------------------------------

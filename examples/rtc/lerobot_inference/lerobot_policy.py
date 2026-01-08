@@ -23,9 +23,6 @@ class RTCDemoConfig(HubMixin):
     # Policy configuration
     policy: PreTrainedConfig | None = None
 
-    # # Robot configuration
-    # robot: RobotConfig | None = None
-
     # RTC configuration
     rtc: RTCConfig = field(
         default_factory=lambda: RTCConfig(
@@ -56,8 +53,6 @@ class RTCDemoConfig(HubMixin):
         default=4,
         metadata={"help": "Inference delay for RTC"},
     )
-
-
 
     # Torch compile configuration
     use_torch_compile: bool = field(
@@ -104,7 +99,7 @@ class RTCDemoConfig(HubMixin):
         return ["policy"]
 
 
-class PI0_INFERENCE:
+class LeRobotPolicy:
     def __init__(self, 
                  cfg: RTCDemoConfig | None = None,
                  ):
@@ -134,9 +129,6 @@ class PI0_INFERENCE:
         self.cfg.policy.device = self.device
 
         self.policy = self._init_policy("Policy")
-        # Turn on RTC
-        self.policy.config.rtc_config = self.cfg.rtc
-        self.policy.init_rtc_processor()
 
         # Create preprocessor/postprocessor
         self.preprocessor, self.postprocessor = make_pre_post_processors(
@@ -164,22 +156,76 @@ class PI0_INFERENCE:
         policy = policy_class.from_pretrained(self.cfg.policy.pretrained_path, config=self.cfg.policy)
         policy = policy.to(self.device)
         policy.eval()
-
+        # Turn on RTC
+        policy.config.rtc_config = self.cfg.rtc
         policy.init_rtc_processor()
-
-        logging.info(f"  RTC enabled: {self.cfg.rtc.enabled}")
+        # Apply torch.compile if enabled
+        if self.cfg.use_torch_compile:
+            policy = self._apply_torch_compile(policy)
+        logging.info(f"  RTC enabled: {self.rtc_enabled}")
         logging.info(f"  RTC debug: {self.cfg.rtc.debug}")
         logging.info(f"  Policy config: {self.cfg.policy}")
 
         logging.info(f"✓ {name} initialized successfully")
-        
+
         return policy
 
-    def get_actions(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _apply_torch_compile(self, policy):
+        """Apply torch.compile to the policy's predict_action_chunk method.
+
+        Args:
+            policy: Policy instance to compile
+
+        Returns:
+            Policy with compiled predict_action_chunk method
+        """
+
+        # PI models handle their own compilation
+        if policy.type == "pi05" or policy.type == "pi0":
+            return policy
+
+        try:
+            # Check if torch.compile is available (PyTorch 2.0+)
+            if not hasattr(torch, "compile"):
+                logging.warning(
+                    f"torch.compile is not available. Requires PyTorch 2.0+. "
+                    f"Current version: {torch.__version__}. Skipping compilation."
+                )
+                return policy
+
+            logging.info("Applying torch.compile to predict_action_chunk...")
+            logging.info(f"  Backend: {self.cfg.torch_compile_backend}")
+            logging.info(f"  Mode: {self.cfg.torch_compile_mode}")
+            logging.info(f"  Disable CUDA graphs: {self.cfg.torch_compile_disable_cudagraphs}")
+
+            # Compile the predict_action_chunk method
+            # - CUDA graphs disabled to prevent tensor aliasing from in-place ops (x_t += dt * v_t)
+            compile_kwargs = {
+                "backend": self.cfg.torch_compile_backend,
+                "mode": self.cfg.torch_compile_mode,
+            }
+
+            # Disable CUDA graphs if requested (prevents tensor aliasing issues)
+            if self.cfg.torch_compile_disable_cudagraphs:
+                compile_kwargs["options"] = {"triton.cudagraphs": False}
+
+            original_method = policy.predict_action_chunk
+            compiled_method = torch.compile(original_method, **compile_kwargs)
+            policy.predict_action_chunk = compiled_method
+            logging.info("✓ Successfully compiled predict_action_chunk")
+
+        except Exception as e:
+            logging.error(f"Failed to apply torch.compile: {e}")
+            logging.warning("Continuing without torch.compile")
+        return policy
+
+    def get_actions(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None, inference_delay: int=4) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run inference with RTC enabled policy.
 
         Args:
             obs: Observations for the policy
+            prev_chunk_left_over: Leftover actions from previous chunk
+            inference_delay: Inference delay in steps
 
         Returns:
             Actions predicted by the policy
@@ -190,7 +236,7 @@ class PI0_INFERENCE:
             if self.rtc_enabled:
                 original_actions = self.policy.predict_action_chunk(
                     preprocessed_obs,
-                    inference_delay=self.inference_delay,
+                    inference_delay=inference_delay,
                     prev_chunk_left_over=prev_chunk_left_over,
                 )
             else:
@@ -244,8 +290,8 @@ class PI0_INFERENCE:
 
 @parser.wrap()
 def main(cfg: RTCDemoConfig):
-    pi0_inf = PI0_INFERENCE(cfg=cfg)
-    pi0_inf.run_inference()
+    pi_inf = LeRobotPolicy(cfg=cfg)
+    pi_inf.run_inference()
 
 if __name__ == "__main__":
     # pretrained_policy_path = "/home/gamal/pi0_fintuned/pi0_droid_pytorch_29999"

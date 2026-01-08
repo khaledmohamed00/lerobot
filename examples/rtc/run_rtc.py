@@ -4,13 +4,9 @@ import sys
 import time
 import traceback
 from threading import Event, Thread
-from typing import Dict
-import os
 from pathlib import Path
 
 from lerobot.configs import parser
-from lerobot.configs.policies import PreTrainedConfig
-from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 from lerobot.policies.rtc.action_queue import ActionQueue
 from lerobot.policies.rtc.latency_tracker import LatencyTracker
 from lerobot.rl.process import ProcessSignalHandler
@@ -22,16 +18,13 @@ from lerobot.utils.utils import init_logging
 current_file = Path(__file__).resolve()
 # repo_root = parent of parent
 repo_root = current_file.parents[2]
-# Path you actually want to import from
-rtc_examples_path = repo_root / "examples" / "rtc"
-# Add once
-if rtc_examples_path not in map(Path, sys.path):
-    sys.path.append(str(rtc_examples_path))
+if repo_root not in map(Path, sys.path):
+    sys.path.append(str(repo_root))
 
-from rtc_inference import RTCDemoConfig  # noqa: E402
-from robot_interface import RobotWrapper  # noqa: E402
-from robot import Robot_simulation  # noqa: E402
-from rtc_inference import PI0_INFERENCE
+from examples.rtc.lerobot_inference import RTCDemoConfig  # noqa: E402
+from examples.rtc.robot_interface import RobotWrapper  # noqa: E402
+from examples.rtc.robot import Robot_simulation  # noqa: E402
+from examples.rtc.lerobot_inference import PI_INFERENCE
 
 # ---------------------------------------------------------------------
 # Logging setup
@@ -61,7 +54,7 @@ def is_image_key(k: str) -> bool:
 # Thread: get action chunks from policy
 # ---------------------------------------------------------------------
 def get_actions(
-    policy: PI0_INFERENCE,
+    policy: PI_INFERENCE,
     robot: RobotWrapper,
     action_queue: ActionQueue,
     shutdown_event: Event,
@@ -229,7 +222,7 @@ def demo_cli(cfg: RTCDemoConfig):
     shutdown_event = signal_handler.shutdown_event
 
     # policy
-    policy = PI0_INFERENCE(cfg=cfg)
+    policy = PI_INFERENCE(cfg=cfg)
     assert policy.policy.name in ["smolvla", "pi05", "pi0"], "Only smolvla, pi05, and pi0 are supported for RTC"
 
     logger.info(f"[MAIN] Policy ready | name={policy.policy.name}")
