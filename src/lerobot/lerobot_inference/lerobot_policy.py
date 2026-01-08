@@ -243,8 +243,11 @@ class LeRobotPolicy:
                 )
             else:
                 original_actions = self.policy.predict_action_chunk(preprocessed_obs)
-            actions = self.postprocessor(original_actions).squeeze(0)
-        return actions, original_actions.squeeze(0)
+            actions = self.postprocessor(original_actions)
+        # to numpy
+        actions = actions.squeeze(0).detach().cpu().numpy()
+        original_actions = original_actions.squeeze(0).detach().cpu().numpy()
+        return actions, original_actions
     
     def run_inference(self):
         """Run inference with RTC enabled policy.
