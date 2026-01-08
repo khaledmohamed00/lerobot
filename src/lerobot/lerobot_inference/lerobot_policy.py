@@ -85,6 +85,8 @@ class RTCDemoConfig(HubMixin):
             cli_overrides = parser.get_cli_overrides("policy")
             self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
             self.policy.pretrained_path = policy_path
+        elif self.policy and self.policy.pretrained_path:
+            pass
         else:
             raise ValueError("Policy path is required")
         self.action_queue_size_to_get_new_actions: int = self.horizon - (self.rtc.execution_horizon + self.inference_delay)
