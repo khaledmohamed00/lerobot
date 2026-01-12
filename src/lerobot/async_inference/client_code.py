@@ -1,0 +1,81 @@
+import time
+import pickle  # nosec
+import grpc
+import numpy as np
+from PIL import Image
+from tqdm import tqdm
+
+from lerobot.transport import services_pb2, services_pb2_grpc
+from lerobot.transport.utils import grpc_channel_options, send_bytes_in_chunks
+from lerobot.async_inference.helpers import TimedObservation
+local = False
+if local:
+    SERVER = "127.0.0.1:8080"
+else:
+    SERVER = "airtower.utn-mi.de:8000"
+ENV_DT = 1.0 / 30.0  # just for channel options; doesn't affect timings
+
+def load_img(path: str, hw=(224, 224)) -> np.ndarray:
+    return np.array(Image.open(path).resize((hw[1], hw[0])))
+
+def roundtrip_once(stub, payload, step: int) -> float:
+    obs = TimedObservation(
+        timestamp=time.time(),
+        observation=payload,
+        timestep=step,
+    )
+
+    t0 = time.perf_counter()
+
+    # Send observation
+    obs_bytes = pickle.dumps(obs)  # includes numpy arrays, same approach
+    obs_iter = send_bytes_in_chunks(obs_bytes, services_pb2.Observation, silent=True)
+    stub.SendObservations(obs_iter)
+
+    # Get actions (poll until non-empty)
+    while True:
+        msg = stub.GetActions(services_pb2.Empty())
+        if len(msg.data) > 0:
+            _actions = pickle.loads(msg.data)  # list[TimedAction]
+            break
+
+    t1 = time.perf_counter()
+    return t1 - t0
+
+def main():
+    # Build payload once (fixed images like your OpenPI test)
+    size = (224, 224)
+    #size = (720, 1280)
+    side_image = load_img("//hdd_data/juelg/viral/side_observer_30.png", size)
+    wrist_image = load_img("//hdd_data/juelg/viral/side_right_30.png", size)
+
+    payload = {
+        "images": {
+            "side_image": side_image,
+            "wrist_image": wrist_image,
+        },
+        "instruction": "do something",
+    }
+
+    channel = grpc.insecure_channel(
+        SERVER,
+        grpc_channel_options(initial_backoff=f"{ENV_DT:.4f}s"),
+    )
+    stub = services_pb2_grpc.AsyncInferenceStub(channel)
+
+    # handshake
+    stub.Ready(services_pb2.Empty())
+
+    times = []
+    for i in tqdm(range(1000)):
+        dt = roundtrip_once(stub, payload, i)
+        times.append(dt)
+
+    channel.close()
+    print("Results over 1000 runs:")
+    print("size:", size)
+    print("on same machine" , local)
+    print("avg:", sum(times) / len(times), "min:", min(times), "max:", max(times))
+
+if __name__ == "__main__":
+    main()

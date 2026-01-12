@@ -63,7 +63,9 @@ class PolicyServerConfig:
     obs_queue_timeout: float = field(
         default=DEFAULT_OBS_QUEUE_TIMEOUT, metadata={"help": "Timeout for observation queue in seconds"}
     )
-
+    dummy_actions: bool = False
+    dummy_action_dim: int = 0
+    dummy_actions_per_chunk: int = 0
     def __post_init__(self):
         """Validate configuration after initialization."""
         if self.port < 1 or self.port > 65535:
