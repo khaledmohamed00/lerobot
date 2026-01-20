@@ -38,6 +38,10 @@ class Robot_simulation(RobotInterface):
         except StopIteration:
             self.loader_iter = iter(self.data_loader)
             obs = next(self.loader_iter)
+        # go over the dictionay transfer if torch tensor to numpy and squeeze the batch dimension
+        for k in obs:
+            if isinstance(obs[k], torch.Tensor):
+                obs[k] = obs[k].squeeze(0).detach().cpu().numpy()
         return obs
 
     def send_action(self, action: torch.Tensor):
