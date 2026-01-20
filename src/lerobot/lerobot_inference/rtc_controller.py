@@ -17,7 +17,8 @@ from .lerobot_policy import RTCDemoConfig  # noqa: E402
 from .robot_interface import RobotWrapper  # noqa: E402
 from .robot import Robot_simulation  # noqa: E402
 from .lerobot_policy import LeRobotPolicy
-
+from .agent_interface import PolicyAgent
+from .agent_interface import PolicyClient
 # ---------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------
@@ -38,9 +39,9 @@ def log_rtc_step(tag: str, **kwargs):
     rtc_logger.info(f"[RTC] {tag:<10s} | {parts}")
 
 class RTCController:
-    def __init__(self, cfg: RTCDemoConfig, policy: LeRobotPolicy, robot: RobotWrapper):
+    def __init__(self, cfg: RTCDemoConfig, policy_agent: PolicyAgent, robot: RobotWrapper):
         self.cfg = cfg
-        self.policy = policy
+        self.policy_agent = policy_agent
         self.robot = robot
         self.queue = ActionQueue(cfg.rtc) # Thread-safe action queue
         self.latency_tracker = LatencyTracker()  # Track latency of action chunks
@@ -109,12 +110,15 @@ class RTCController:
 
                 inference_latency = self.latency_tracker.max()  # seconds
                 inference_delay = math.ceil(inference_latency / self.time_per_tick)
-
                 obs = self.robot.get_observation()
-                post, orig = self.policy.get_actions(
+                out = self.policy_agent.act(
                     obs, prev_chunk_left_over=prev_left, inference_delay=inference_delay
                 )
-
+                if isinstance(self.policy_agent.policy, PolicyClient):
+                    post = out.action  # numpy [T, action_dim]
+                    orig = out.original_action  # numpy [T, action_dim]
+                elif isinstance(self.policy_agent.policy, LeRobotPolicy):
+                    post, orig = out  # both torch [T, action_dim]
                 new_latency = time.perf_counter() - t0
                 new_delay = math.ceil(new_latency / self.time_per_tick)
                 self.latency_tracker.add(new_latency)
@@ -129,7 +133,7 @@ class RTCController:
 
                 if self.cfg.action_queue_size_to_get_new_actions < self.cfg.rtc.execution_horizon + new_delay:
                     logger.warning(
-                        "[GET_ACTIONS] cfg.action_queue_size_to_get_new_actions Too small, It should be higher than inference delay + execution horizon."
+                        "[act] cfg.action_queue_size_to_get_new_actions Too small, It should be higher than inference delay + execution horizon."
                     )
 
                 self.queue.merge(orig, post, new_delay, action_index)
@@ -177,11 +181,38 @@ class RTCController:
 @parser.wrap()
 def demo_cli(cfg: RTCDemoConfig):
     init_logging()
-
-    policy = LeRobotPolicy(cfg=cfg)
     robot = RobotWrapper(Robot_simulation(fps=cfg.fps))
 
-    ctrl = RTCController(cfg, policy, robot)
+    port = 20997
+    local = True
+    is_agent = False
+    model = "lerobot_pi"
+    if local == True:
+    # test local connection
+        host = "localhost"
+        on_same_machine = True
+        if is_agent == True:
+            policy_client = PolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)
+            obs = robot.get_observation()
+            obs_converted = policy_client.get_obs(obs)
+            instruction = "pick the green box"
+            policy_client.reset(obs=obs_converted, instruction=instruction)
+        else:
+            policy_client = LeRobotPolicy(cfg=cfg)
+    else:
+    # test remote connection
+        #host = "airtower.utn-mi.de"
+        host = "localhost"
+
+        on_same_machine = False
+        policy_client = PolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)
+        obs = robot.get_observation()
+        obs_converted = policy_client.get_obs(obs)
+        instruction = "pick the green box"
+        policy_client.reset(obs=obs_converted, instruction=instruction)
+    
+    policy_agent = PolicyAgent(policy=policy_client)
+    ctrl = RTCController(cfg, policy_agent, robot)
     ctrl.start()
 
     start = time.time()

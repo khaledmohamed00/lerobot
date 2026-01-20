@@ -164,6 +164,10 @@ class ActionQueue:
             processed_actions: Post-processed actions for robot.
             real_delay: Number of time steps to skip due to inference delay.
         """
+        if not isinstance(original_actions, torch.Tensor):
+            original_actions = torch.tensor(original_actions)
+        if not isinstance(processed_actions, torch.Tensor): 
+            processed_actions = torch.tensor(processed_actions)
         self.original_queue = original_actions[real_delay:].clone()
         self.queue = processed_actions[real_delay:].clone()
 

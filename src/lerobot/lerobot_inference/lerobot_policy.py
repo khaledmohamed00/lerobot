@@ -221,7 +221,7 @@ class LeRobotPolicy:
             logging.warning("Continuing without torch.compile")
         return policy
 
-    def get_actions(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None, inference_delay: int=4) -> Tuple[torch.Tensor, torch.Tensor]:
+    def infer(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None, inference_delay: int=4) -> Tuple[torch.Tensor, torch.Tensor]:
         """Run inference with RTC enabled policy.
 
         Args:
@@ -287,7 +287,7 @@ class LeRobotPolicy:
             # 'action_is_pad', # torch.Size([1, 50])  # bool
             # 'task'] # ["string"]
 
-            actions = self.get_actions(obs)
+            actions = self.infer(obs)
             print("Predicted actions shape:", actions.shape)
 
 @parser.wrap()
