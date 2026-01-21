@@ -42,11 +42,10 @@ class PolicyClient(RemoteAgent):
         # wrist = obs["frames"]["wrist"]["rgb"]["data"]
         # gripper = obs["gripper"]
         # joints = obs["joints"]
-        # to numpy arrays
 
-        side = obs["observation.images.image"].squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.uint8)  # HWC
-        wrist = obs["observation.images.image2"].squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.uint8)  # HWC
-        state = obs["observation.state"].squeeze(0).cpu().numpy()  # 8-dim
+        side = obs["observation.images.image"].transpose(1, 2, 0).astype(np.uint8)  # HWC
+        wrist = obs["observation.images.image2"].transpose(1, 2, 0).astype(np.uint8)  # HWC
+        state = obs["observation.state"]  # 8-dim
         joints = state[:7]  # first 7 values are joint positions
         gripper = state[7]  # the last value is gripper open/close value
         prev_chunk_left_over = prev_chunk_left_over.cpu().numpy() if prev_chunk_left_over is not None else None
@@ -73,24 +72,6 @@ class PolicyClient(RemoteAgent):
                     gripper=gripper, info=dict(joints=joints,
                                                 prev_chunk_left_over=prev_chunk_left_over,
                                                 inference_delay=inference_delay))
-
-    def load_obs(self, imgs_path_dict, images_size):
-        obs = {}
-        side = np.array(Image.open(imgs_path_dict["side"]).resize((images_size[1], images_size[0])))
-        print("side shape", side.shape)
-        wrist = np.array(Image.open(imgs_path_dict["wrist"]).resize((images_size[1], images_size[0])))
-        print("wrist shape", wrist.shape)
-        print(side.min(), side.max(), wrist.min(), wrist.max())
-        # example obs
-        obs = {
-            "frames": {
-                "side": {"rgb": {"data": side}},
-                "wrist": {"rgb": {"data": wrist}},
-            },
-            "gripper": 0.5,
-            "joints": [0.0, 0.5, 1.0, -0.5, 0.0, 0.3],
-        }
-        return obs
     
 
 class PolicyAgent:

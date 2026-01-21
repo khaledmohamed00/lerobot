@@ -240,7 +240,7 @@ class LeRobotPolicy:
                     preprocessed_obs,
                     inference_delay=inference_delay,
                     prev_chunk_left_over=prev_chunk_left_over,
-                )
+                ).squeeze(0)
             else:
                 original_actions = self.policy.predict_action_chunk(preprocessed_obs).squeeze(0)
             actions = self.postprocessor(original_actions).squeeze(0)

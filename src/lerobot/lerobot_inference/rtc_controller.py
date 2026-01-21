@@ -184,8 +184,8 @@ def demo_cli(cfg: RTCDemoConfig):
     robot = RobotWrapper(Robot_simulation(fps=cfg.fps))
 
     port = 20997
-    local = True
-    is_agent = False
+    local = False
+    is_agent = True
     model = "lerobot_pi"
     if local == True:
     # test local connection

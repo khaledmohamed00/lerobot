@@ -18,7 +18,6 @@ class ActionQueue:
       - queue: processed actions to execute (T, A)
       - original_queue: original actions for leftover computation (T, A)
 
-    API mirrors your original class.
     """
 
     def __init__(self, enable_rtc: bool = True):
