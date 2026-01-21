@@ -1,24 +1,20 @@
 import logging
 import math
-import sys
 import time
 import traceback
 from threading import Event, Thread
-from pathlib import Path
+from dataclasses import dataclass
 
-from lerobot.configs import parser
-from lerobot.policies.rtc.action_queue import ActionQueue
-from lerobot.policies.rtc.latency_tracker import LatencyTracker
-from lerobot.rl.process import ProcessSignalHandler
-from lerobot.utils.constants import OBS_IMAGES
-from lerobot.utils.utils import init_logging
+import numpy as np
 
-from .lerobot_policy import RTCDemoConfig  # noqa: E402
-from .robot_interface import RobotWrapper  # noqa: E402
-from .robot import Robot_simulation  # noqa: E402
+from .robot_interface import RobotWrapper  
+from .robot import Robot_simulation  
 from .lerobot_policy import LeRobotPolicy
 from .agent_interface import PolicyAgent
 from .agent_interface import PolicyClient
+from .client_agent_policy import SimPolicyClient
+from .action_queue import ActionQueue
+from .latency_tracker import LatencyTracker
 # ---------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------
@@ -33,31 +29,50 @@ rtc_logger = logging.getLogger("rtc.flow")
 rtc_logger.setLevel(logging.INFO)
 
 
+@dataclass(frozen=True)
+class RTCConfig:
+    enabled: bool = True
+    execution_horizon: int = 10
+
+@dataclass(frozen=False)
+class SimpleDemoConfig:
+    # Fields that affect behavior in THIS script
+    fps: int = 10
+    duration: float = 120.0
+    inference_delay: int = 4
+    rtc: RTCConfig = RTCConfig()
+    horizon: int = 50
+    action_queue_size_to_get_new_actions: int = 36
+
+    def __post_init__(self):
+        self.action_queue_size_to_get_new_actions = self.horizon - (self.rtc.execution_horizon + self.inference_delay)
+
+
 def log_rtc_step(tag: str, **kwargs):
     # single-line, grep-friendly RTC logs
     parts = " | ".join(f"{k}={v}" for k, v in kwargs.items())
     rtc_logger.info(f"[RTC] {tag:<10s} | {parts}")
 
 class RTCController:
-    def __init__(self, cfg: RTCDemoConfig, policy_agent: PolicyAgent, robot: RobotWrapper):
+    def __init__(self, cfg: SimpleDemoConfig, policy_agent: PolicyAgent, robot: RobotWrapper):
         self.cfg = cfg
         self.policy_agent = policy_agent
         self.robot = robot
-        self.queue = ActionQueue(cfg.rtc) # Thread-safe action queue
+        self.queue = ActionQueue(self.cfg.rtc) # Thread-safe action queue
         self.latency_tracker = LatencyTracker()  # Track latency of action chunks
 
         self.shutdown = Event()
         self.exc: Exception | None = None
 
-        H, D, E = cfg.horizon, cfg.inference_delay, cfg.rtc.execution_horizon
+        H, D, E = self.cfg.horizon, self.cfg.inference_delay, self.cfg.rtc.execution_horizon
         if E > (H - D):
             raise ValueError(
                 f"execution_horizon must be <= horizon - inference_delay "
                 f"({E} <= {H - D})"
             )
 
-        self.trigger_qsize = cfg.action_queue_size_to_get_new_actions
-        self.time_per_tick = 1.0 / float(cfg.fps)
+        self.trigger_qsize = self.cfg.action_queue_size_to_get_new_actions
+        self.time_per_tick = 1.0 / float(self.cfg.fps)
 
         log_rtc_step(
             "BOOT",
@@ -65,7 +80,7 @@ class RTCController:
             exec_horizon=E,
             delay=D,
             trigger=self.trigger_qsize,
-            fps=cfg.fps,
+            fps=self.cfg.fps,
         )
 
     def start(self):
@@ -163,24 +178,24 @@ class RTCController:
                 if action is None:
                     continue
 
-                action_cpu = action.cpu()
-                self.robot.send_action(action_cpu)
+                self.robot.send_action(action)
                 exec_count += 1
 
                 log_rtc_step(
                     "EXEC",
                     exec_count=exec_count,
                     action_idx=self.queue.get_action_index(),
-                    act_max=f"{action_cpu.abs().max().item():.4f}",
+                    act_max=f"{np.abs(action).max():.4f}",
                     q=self.queue.qsize(),
                 )
 
         except Exception as e:
             self._fail(e)
 
-@parser.wrap()
-def demo_cli(cfg: RTCDemoConfig):
-    init_logging()
+# @parser.wrap()
+# def demo_cli(cfg: RTCDemoConfig):
+def demo_cli():
+    cfg = SimpleDemoConfig()
     robot = RobotWrapper(Robot_simulation(fps=cfg.fps))
 
     port = 20997
@@ -192,20 +207,30 @@ def demo_cli(cfg: RTCDemoConfig):
         host = "localhost"
         on_same_machine = True
         if is_agent == True:
-            policy_client = PolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)
+            policy_client = SimPolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)
             obs = robot.get_observation()
             obs_converted = policy_client.get_obs(obs)
             instruction = "pick the green box"
             policy_client.reset(obs=obs_converted, instruction=instruction)
         else:
-            policy_client = LeRobotPolicy(cfg=cfg)
+            from .lerobot_policy import RTCDemoConfig, LeRobotPolicy
+            from lerobot.configs.policies import PreTrainedConfig
+            default_checkpoint_path = "/home/gamal/pi0_fintuned/pi0_droid_pytorch_29999"
+            policy_cfg = PreTrainedConfig.from_pretrained(pretrained_name_or_path=default_checkpoint_path)
+            lerobot_cfg = RTCDemoConfig(policy=policy_cfg)
+            lerobot_cfg.policy.pretrained_path = default_checkpoint_path
+            print("Initializing LeRobotPolicy with path:", default_checkpoint_path)
+            print("default_checkpoint_path:", default_checkpoint_path)
+            policy_client = LeRobotPolicy(cfg=lerobot_cfg)
+            print("LeRobotPolicy initialized")
+            # pass
     else:
     # test remote connection
         #host = "airtower.utn-mi.de"
         host = "localhost"
 
         on_same_machine = False
-        policy_client = PolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)
+        policy_client = SimPolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)
         obs = robot.get_observation()
         obs_converted = policy_client.get_obs(obs)
         instruction = "pick the green box"
