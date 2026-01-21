@@ -6,15 +6,16 @@ from abc import ABC, abstractmethod
 from typing import Dict
 from threading import Lock
 
-import torch
+import numpy as np
+
 
 class RobotInterface(ABC):
     @abstractmethod
-    def get_observation(self) -> Dict[str, torch.Tensor]:
+    def get_observation(self) -> Dict[str, np.ndarray]:
         pass
 
     @abstractmethod
-    def send_action(self, action: torch.Tensor):
+    def send_action(self, action: np.ndarray):
         pass
 
 class RobotWrapper:
@@ -31,11 +32,11 @@ class RobotWrapper:
         # Keep real Lock; avoid the "lock=True" bug.
         self.lock = Lock()
 
-    def get_observation(self) -> Dict[str, torch.Tensor]:
+    def get_observation(self) -> Dict[str, np.ndarray]:
         with self.lock:
             return self.robot.get_observation()
 
-    def send_action(self, action: torch.Tensor):
+    def send_action(self, action: np.ndarray):
         with self.lock:
             return self.robot.send_action(action)
 

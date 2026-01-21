@@ -1,9 +1,8 @@
-import gc
 import logging
-import os
-import random
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Tuple, Mapping, Any
+from abc import ABC, abstractmethod
+
 import numpy as np
 import torch
 
@@ -101,7 +100,14 @@ class RTCDemoConfig(HubMixin):
         return ["policy"]
 
 
-class LeRobotPolicy:
+class LeRobotPolicy_interface(ABC):
+    def __init__(self, cfg):
+        self.cfg = cfg
+    @abstractmethod
+    def infer(self, obs: Mapping[str, Any], prev_chunk_left_over: Any | None, inference_delay: int) -> Tuple[np.ndarray, np.ndarray]:
+        pass
+
+class LeRobotPolicy(LeRobotPolicy_interface):
     def __init__(self, 
                  cfg: RTCDemoConfig | None = None,
                  ):

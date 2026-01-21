@@ -3,14 +3,17 @@ import io
 import base64
 import time
 from typing import Union
+from abc import ABC, abstractmethod
+from typing import Tuple, Mapping, Any
 
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
+import torch
+
 from agents.client import RemoteAgent
 from agents.policies import Obs
-
-from .lerobot_policy import LeRobotPolicy
+#from ..lerobot_policy import LeRobotPolicy_interface
 
 # interface for PolicyClient to convert observations
 class PolicyClient(RemoteAgent):
@@ -30,7 +33,7 @@ class PolicyClient(RemoteAgent):
         pass    
 
 class PolicyAgent:
-    def __init__(self, policy: Union[PolicyClient, LeRobotPolicy] ):
+    def __init__(self, policy: Union[PolicyClient, Any] ):
         self.policy = policy
 
     def act(self, obs: dict,
@@ -44,9 +47,8 @@ class PolicyAgent:
             action = self.policy.act(obs_converted)
 
             return action
-        elif isinstance(self.policy, LeRobotPolicy):
+        elif isinstance(self.policy, Any):
             # if numpy arrays, convert to torch tensors
-            import torch
             for k in obs:
                 if isinstance(obs[k], np.ndarray):
                     obs[k] = torch.from_numpy(obs[k]).unsqueeze(0)

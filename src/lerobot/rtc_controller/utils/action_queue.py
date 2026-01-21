@@ -132,7 +132,9 @@ class ActionQueue:
     def _check_delays(self, real_delay: int, action_index_before_inference: Optional[int] = None) -> None:
         """
         Compare actions consumed during inference (index diff) vs real_delay.
-        This mirrors your original warning logic.
+        Args:
+            real_delay: Number of time steps of inference delay.
+            action_index_before_inference: Index before inference started, for validation.
         """
         if action_index_before_inference is None:
             return

@@ -1,11 +1,10 @@
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-import torch
 from typing import Dict
 import time
 import sys
-import os
-from pathlib import Path
-import sys
+
+import numpy as np
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+import torch
 
 from .robot_interface import RobotInterface
 # ---------------------------------------------------------------------
@@ -32,7 +31,7 @@ class Robot_simulation(RobotInterface):
         self.action_features = []
         print(f"[SIM] Dataset simulation initialized | repo_id={dataset_repo_id}")
 
-    def get_observation(self) -> Dict[str, torch.Tensor]:
+    def get_observation(self) -> Dict[str, np.ndarray]:
         try:
             obs = next(self.loader_iter)
         except StopIteration:
@@ -44,7 +43,7 @@ class Robot_simulation(RobotInterface):
                 obs[k] = obs[k].squeeze(0).detach().cpu().numpy()
         return obs
 
-    def send_action(self, action: torch.Tensor):
+    def send_action(self, action: np.ndarray):
         # logger fps
         sleep_time = 1.0 / float(self.fps)
         time.sleep(sleep_time)

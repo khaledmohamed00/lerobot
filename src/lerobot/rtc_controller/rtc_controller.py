@@ -7,14 +7,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .robot_interface import RobotWrapper  
-from .robot import Robot_simulation  
-from .lerobot_policy import LeRobotPolicy
-from .agent_interface import PolicyAgent
-from .agent_interface import PolicyClient
-from .client_agent_policy import SimPolicyClient
-from .action_queue import ActionQueue
-from .latency_tracker import LatencyTracker
+from .robot_interface.robot_interface import RobotWrapper  
+from .agent_interface.agent_interface import PolicyAgent
+from .agent_interface.agent_interface import PolicyClient
+from .agent_interface.client_agent_policy import SimPolicyClient
+from .utils.action_queue import ActionQueue
+from .utils.latency_tracker import LatencyTracker
 # ---------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------
@@ -196,8 +194,12 @@ class RTCController:
 # def demo_cli(cfg: RTCDemoConfig):
 def demo_cli():
     cfg = SimpleDemoConfig()
-    robot = RobotWrapper(Robot_simulation(fps=cfg.fps))
-
+    #from .robot_interface.robot_simulation import Robot_simulation  
+    #from .lerobot_policy import LeRobotPolicy
+    #robot = RobotWrapper(Robot_simulation(fps=cfg.fps))
+    from .robot_interface.robot_dumy import RobotDummy
+    dummy_path = "/home/gamal/repos/lerobot/src/lerobot/rtc_controller/robot_interface/sim_obs.npz"
+    robot = RobotWrapper(RobotDummy(fps=cfg.fps, dummy_data_path=dummy_path))
     port = 20997
     local = False
     is_agent = True
