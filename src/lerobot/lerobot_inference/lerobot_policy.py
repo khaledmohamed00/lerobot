@@ -15,6 +15,9 @@ from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 from lerobot.policies.rtc.configuration_rtc import RTCConfig
 from lerobot.utils.hub import HubMixin
 
+from .Policy_interface import PolicyInterface
+
+
 @dataclass
 class RTCDemoConfig(HubMixin):
     """Configuration for RTC demo with action chunking policies and real robots."""
@@ -100,14 +103,9 @@ class RTCDemoConfig(HubMixin):
         return ["policy"]
 
 
-class LeRobotPolicy_interface(ABC):
-    def __init__(self, cfg):
-        self.cfg = cfg
-    @abstractmethod
-    def infer(self, obs: Mapping[str, Any], prev_chunk_left_over: Any | None, inference_delay: int) -> Tuple[np.ndarray, np.ndarray]:
-        pass
 
-class LeRobotPolicy(LeRobotPolicy_interface):
+
+class LeRobotPolicy(PolicyInterface):
     def __init__(self, 
                  cfg: RTCDemoConfig | None = None,
                  ):

@@ -36,7 +36,7 @@ class RTCConfig:
 class SimpleDemoConfig:
     # Fields that affect behavior in THIS script
     fps: int = 10
-    duration: float = 120.0
+    duration: float = -1  # seconds
     inference_delay: int = 4
     rtc: RTCConfig = RTCConfig()
     horizon: int = 50
@@ -130,7 +130,7 @@ class RTCController:
                 if isinstance(self.policy_agent.policy, PolicyClient):
                     post = out.action  # numpy [T, action_dim]
                     orig = out.original_action  # numpy [T, action_dim]
-                elif isinstance(self.policy_agent.policy, LeRobotPolicy):
+                else:
                     post, orig = out  # both torch [T, action_dim]
                 new_latency = time.perf_counter() - t0
                 new_delay = math.ceil(new_latency / self.time_per_tick)
@@ -215,7 +215,7 @@ def demo_cli():
             instruction = "pick the green box"
             policy_client.reset(obs=obs_converted, instruction=instruction)
         else:
-            from .lerobot_policy import RTCDemoConfig, LeRobotPolicy
+            from ..lerobot_inference.lerobot_policy import RTCDemoConfig, LeRobotPolicy
             from lerobot.configs.policies import PreTrainedConfig
             default_checkpoint_path = "/home/gamal/pi0_fintuned/pi0_droid_pytorch_29999"
             policy_cfg = PreTrainedConfig.from_pretrained(pretrained_name_or_path=default_checkpoint_path)
@@ -244,7 +244,8 @@ def demo_cli():
 
     start = time.time()
     last = 0.0
-
+    if cfg.duration <= 0:
+        cfg.duration = 1e10  # effectively infinite
     while (time.time() - start) < cfg.duration and not ctrl.shutdown.is_set():
         time.sleep(0.2)
         elapsed = time.time() - start

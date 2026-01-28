@@ -13,7 +13,7 @@ import torch
 
 from agents.client import RemoteAgent
 from agents.policies import Obs
-#from ..lerobot_policy import LeRobotPolicy_interface
+#from ..lerobot_policy import Policy_interface
 
 # interface for PolicyClient to convert observations
 class PolicyClient(RemoteAgent):
@@ -47,11 +47,14 @@ class PolicyAgent:
             action = self.policy.act(obs_converted)
 
             return action
-        elif isinstance(self.policy, Any):
+        else:
             # if numpy arrays, convert to torch tensors
             for k in obs:
                 if isinstance(obs[k], np.ndarray):
-                    obs[k] = torch.from_numpy(obs[k]).unsqueeze(0)
+                    if obs[k].dtype.type is np.str_:
+                        obs[k] = obs[k].tolist()
+                    else:
+                        obs[k] = torch.from_numpy(obs[k]).unsqueeze(0)
             prev_chunk_left_over = (torch.from_numpy(prev_chunk_left_over).unsqueeze(0)
                                     if prev_chunk_left_over is not None else None)
 
@@ -60,5 +63,3 @@ class PolicyAgent:
                                       inference_delay=inference_delay,
                                       )
             return action
-        else:
-            raise ValueError("Unsupported policy type")
