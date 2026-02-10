@@ -225,6 +225,24 @@ class LeRobotPolicy(PolicyInterface):
             logging.warning("Continuing without torch.compile")
         return policy
 
+    def absolute_action_from_relative(self, relative_action: np.ndarray, obs: dict[str, torch.Tensor]) -> np.ndarray:
+        """Convert relative action to absolute action using the current observation.
+
+        Args:
+            relative_action: The relative action predicted by the policy (shape: [action_dim])
+            obs: The current observation containing the robot state (including joint positions)
+
+        Returns:
+            Absolute action (shape: [action_dim])
+        """
+        # Assuming the first 7 dimensions of the state are joint positions
+        current_joints = obs["observation.state"][:, :7].cpu().numpy()  # shape: [7]
+        absolute_action = current_joints + relative_action[:, :7]  # shape: [50, 7]
+        # For the gripper action, we can directly use the predicted value (open/close)
+        gripper_action = relative_action[:, 7]  # shape: [50]
+
+        return np.concatenate([absolute_action, gripper_action[:, None]], axis=1)  # shape: [50, 8]
+
     def infer(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None, inference_delay: int=4) -> Tuple[np.ndarray, np.ndarray]:
         """Run inference with RTC enabled policy.
 
@@ -236,7 +254,17 @@ class LeRobotPolicy(PolicyInterface):
         Returns:
             Actions predicted by the policy
         """
-
+        # observation.images.image: expected to be torch tensor of type uint8 in range [0, 255]
+        # observation.images.image2: expected to be torch tensor of type uint8 in range [0, 255]
+        # the preprocessor only expects the image tensors to be in float32 and normalized to [0,1],
+        # so we need to convert them before calling the preprocessor
+        # before calling self.preprocessor:
+        # observation.images.image value should be torch tensor of type float32 in range [0,1]
+        # observation.images.image2 value should be torch tensor of type float32 in range [0,1]
+        if obs["observation.images.image"].dtype == torch.uint8:
+            obs["observation.images.image"] = obs["observation.images.image"].float() / 255.0
+        if obs["observation.images.image2"].dtype == torch.uint8:
+            obs["observation.images.image2"] = obs["observation.images.image2"].float() / 255.0
         with torch.no_grad():
             preprocessed_obs = self.preprocessor(obs)
             if self.rtc_enabled:
@@ -250,7 +278,8 @@ class LeRobotPolicy(PolicyInterface):
             actions = self.postprocessor(original_actions)
         actions = actions.squeeze(0).detach().cpu().numpy()
         original_actions = original_actions.squeeze(0).detach().cpu().numpy()
-        return actions, original_actions
+        absolute_actions = self.absolute_action_from_relative(actions, obs)
+        return absolute_actions, original_actions
 
     def run_inference(self):
         """Run inference with RTC enabled policy.

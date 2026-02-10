@@ -18,6 +18,14 @@ class RobotDummy(RobotInterface):
         Return a fixed dummy observation.
         """
         data_loaded = {k: self.data[k] for k in self.data.files} if self.data is not None else {}
+        #observation.images.image
+        data_loaded['observation.images.image'] = data_loaded.get('observation.images.image', np.zeros((480, 640, 3), dtype=np.uint8))*255        
+        data_loaded['observation.images.image2'] = data_loaded.get('observation.images.image2', np.zeros((480, 640, 3), dtype=np.uint8))*255        
+        data_loaded['observation.images.image'] = data_loaded['observation.images.image'].astype(np.uint8)
+        data_loaded['observation.images.image2'] = data_loaded['observation.images.image2'].astype(np.uint8)
+        # remove key action if exists
+        if 'action' in data_loaded:
+            del data_loaded['action']
         return data_loaded
 
     def send_action(self, action: np.ndarray):
