@@ -21,7 +21,7 @@ class PolicyClient(RemoteAgent):
                  port: int,
                  model: str,
                  on_same_machine: bool,
-                 instruction: str ):  
+                ):  
         super().__init__(host, port, model, on_same_machine)
 
     def get_obs(self, obs: dict,

@@ -15,8 +15,8 @@ class SimPolicyClient(PolicyClient):
                  port: int= 20997,
                  model: str = "lerobot_pi",
                  on_same_machine: bool = False,
-                 instruction: str = ""):  
-        super().__init__(host, port, model, on_same_machine, instruction)
+                ):  
+        super().__init__(host, port, model, on_same_machine)
 
     def get_obs(self, obs: dict[str, np.ndarray],
                 prev_chunk_left_over: np.ndarray = None,
