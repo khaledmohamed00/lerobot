@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .robot_interface.robot_interface import RobotWrapper  
+from .robot_interface.robot_interface import RobotInterface  
 from .agent_interface.agent_interface import PolicyAgent
 from .agent_interface.agent_interface import PolicyClient
 from .agent_interface.client_agent_policy import SimPolicyClient
@@ -52,7 +52,7 @@ def log_rtc_step(tag: str, **kwargs):
     rtc_logger.info(f"[RTC] {tag:<10s} | {parts}")
 
 class RTCController:
-    def __init__(self, cfg: SimpleDemoConfig, policy_agent: PolicyAgent, robot: RobotWrapper):
+    def __init__(self, cfg: SimpleDemoConfig, policy_agent: PolicyAgent, robot: RobotInterface):
         self.cfg = cfg
         self.policy_agent = policy_agent
         self.robot = robot
@@ -176,7 +176,7 @@ class RTCController:
                 if action is None:
                     continue
 
-                self.robot.send_action(action)
+                self.robot.step(action)
                 exec_count += 1
 
                 log_rtc_step(
@@ -199,11 +199,12 @@ def demo_cli():
     #robot = RobotWrapper(Robot_simulation(fps=cfg.fps))
     from .robot_interface.robot_dumy import RobotDummy
     dummy_path = "/home/gamal/repos/lerobot/src/lerobot/rtc_controller/robot_interface/sim_obs.npz"
-    robot = RobotWrapper(RobotDummy(fps=cfg.fps, dummy_data_path=dummy_path))
+    robot = RobotDummy(fps=cfg.fps, dummy_data_path=dummy_path)
     port = 20997
-    local = False
-    is_agent = True
+    local = True
+    is_agent = False
     model = "lerobot_pi"
+    #model = "openpi"
     if local == True:
     # test local connection
         host = "localhost"
@@ -228,8 +229,8 @@ def demo_cli():
             # pass
     else:
     # test remote connection
-        #host = "airtower.utn-mi.de"
-        host = "localhost"
+        host = "airtower.utn-mi.de"
+        #host = "localhost"
 
         on_same_machine = False
         policy_client = SimPolicyClient(host=host, port=port, model=model, on_same_machine=on_same_machine)

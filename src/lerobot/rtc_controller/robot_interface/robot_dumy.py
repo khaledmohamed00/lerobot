@@ -28,7 +28,7 @@ class RobotDummy(RobotInterface):
             del data_loaded['action']
         return data_loaded
 
-    def send_action(self, action: np.ndarray):
+    def step(self, action: np.ndarray):
         """
         Dummy method to simulate sending an action to the robot.
         Does nothing.
@@ -36,3 +36,6 @@ class RobotDummy(RobotInterface):
         # logger fps
         sleep_time = 1.0 / float(self.fps)
         time.sleep(sleep_time)
+    
+    def reset(self):
+        pass

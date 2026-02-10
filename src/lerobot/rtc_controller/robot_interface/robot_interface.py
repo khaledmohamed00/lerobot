@@ -15,7 +15,10 @@ class RobotInterface(ABC):
         pass
 
     @abstractmethod
-    def send_action(self, action: np.ndarray):
+    def step(self, action: np.ndarray):
+        pass
+
+    def reset(self):
         pass
 
 class RobotWrapper:
@@ -38,12 +41,4 @@ class RobotWrapper:
 
     def send_action(self, action: np.ndarray):
         with self.lock:
-            return self.robot.send_action(action)
-
-    def observation_features(self):
-        with self.lock:
-            return getattr(self.robot, "observation_features", [])
-
-    def action_features(self):
-        with self.lock:
-            return getattr(self.robot, "action_features", [])
+            return self.robot.step(action)

@@ -43,9 +43,10 @@ class Robot_simulation(RobotInterface):
                 obs[k] = obs[k].squeeze(0).detach().cpu().numpy()
         return obs
 
-    def send_action(self, action: np.ndarray):
+    def step(self, action: np.ndarray):
         # logger fps
         sleep_time = 1.0 / float(self.fps)
         time.sleep(sleep_time)
 
-
+    def reset(self):
+        self.loader_iter = iter(self.data_loader)
