@@ -235,6 +235,9 @@ class LeRobotPolicy(PolicyInterface):
         Returns:
             Absolute action (shape: [action_dim])
         """
+        # if relative_action is of shape [action_dim], we need to add batch dimension to make it [1, action_dim]
+        if relative_action.ndim == 1:
+            relative_action = relative_action[None, :]
         # Assuming the first 7 dimensions of the state are joint positions
         current_joints = obs["observation.state"][:, :7].cpu().numpy()  # shape: [7]
         absolute_action = current_joints + relative_action[:, :7]  # shape: [50, 7]
