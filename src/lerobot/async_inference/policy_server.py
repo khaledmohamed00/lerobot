@@ -213,52 +213,101 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         return services_pb2.Empty()
 
+    # def GetActions(self, request, context):  # noqa: N802
+    #     """Returns actions to the robot client. Actions are sent as a single
+    #     chunk, containing multiple actions."""
+    #     client_id = context.peer()
+    #     self.logger.debug(f"Client {client_id} connected for action streaming")
+
+    #     # Generate action based on the most recent observation and its timestep
+    #     try:
+    #         getactions_starts = time.perf_counter()
+    #         obs = self.observation_queue.get(timeout=self.config.obs_queue_timeout)
+    #         self.logger.info(
+    #             f"Running inference for observation #{obs.get_timestep()} (must_go: {obs.must_go})"
+    #         )
+
+    #         with self._predicted_timesteps_lock:
+    #             self._predicted_timesteps.add(obs.get_timestep())
+
+    #         start_time = time.perf_counter()
+    #         action_chunk = self._predict_action_chunk(obs)
+    #         inference_time = time.perf_counter() - start_time
+
+    #         start_time = time.perf_counter()
+    #         actions_bytes = pickle.dumps(action_chunk)  # nosec
+    #         serialize_time = time.perf_counter() - start_time
+
+    #         # Create and return the action chunk
+    #         actions = services_pb2.Actions(data=actions_bytes)
+
+    #         self.logger.info(
+    #             f"Action chunk #{obs.get_timestep()} generated | "
+    #             f"Total time: {(inference_time + serialize_time) * 1000:.2f}ms"
+    #         )
+
+    #         self.logger.debug(
+    #             f"Action chunk #{obs.get_timestep()} generated | "
+    #             f"Inference time: {inference_time:.2f}s |"
+    #             f"Serialize time: {serialize_time:.2f}s |"
+    #             f"Total time: {inference_time + serialize_time:.2f}s"
+    #         )
+
+    #         time.sleep(
+    #             max(0, self.config.inference_latency - max(0, time.perf_counter() - getactions_starts))
+    #         )  # sleep controls inference latency
+
+    #         return actions
+
+    #     except Empty:  # no observation added to queue in obs_queue_timeout
+    #         return services_pb2.Empty()
+
+    #     except Exception as e:
+    #         self.logger.error(f"Error in StreamActions: {e}")
+
+    #         return services_pb2.Empty()
+
     def GetActions(self, request, context):  # noqa: N802
-        """Returns actions to the robot client. Actions are sent as a single
-        chunk, containing multiple actions."""
         client_id = context.peer()
-        self.logger.debug(f"Client {client_id} connected for action streaming")
-
-        # Generate action based on the most recent observation and its timestep
         try:
-            getactions_starts = time.perf_counter()
+
             obs = self.observation_queue.get(timeout=self.config.obs_queue_timeout)
-            self.logger.info(
-                f"Running inference for observation #{obs.get_timestep()} (must_go: {obs.must_go})"
-            )
 
-            with self._predicted_timesteps_lock:
-                self._predicted_timesteps.add(obs.get_timestep())
+            # ---------------------------
+            # DUMMY MODE: no inference
+            # ---------------------------
+            if self.config.dummy_actions:
+                action_dim = self.config.dummy_action_dim
+                actions_per_chunk = self.config.dummy_actions_per_chunk
 
-            start_time = time.perf_counter()
-            action_chunk = self._predict_action_chunk(obs)
-            inference_time = time.perf_counter() - start_time
+                # sanity
+                if action_dim <= 0 or actions_per_chunk <= 0:
+                    self.logger.error(
+                        "dummy_actions enabled but dummy_action_dim or dummy_actions_per_chunk not set"
+                    )
+                    return services_pb2.Empty()
 
-            start_time = time.perf_counter()
-            actions_bytes = pickle.dumps(action_chunk)  # nosec
-            serialize_time = time.perf_counter() - start_time
+                t_send0 = time.perf_counter()
 
-            # Create and return the action chunk
-            actions = services_pb2.Actions(data=actions_bytes)
+                # create dummy chunk
+                dummy = torch.zeros(action_dim, dtype=torch.float32)
+                chunk = [dummy.clone() for _ in range(actions_per_chunk)]
 
-            self.logger.info(
-                f"Action chunk #{obs.get_timestep()} generated | "
-                f"Total time: {(inference_time + serialize_time) * 1000:.2f}ms"
-            )
+                action_chunk = self._time_action_chunk(
+                    obs.get_timestamp(),  # keep their scheduling semantics
+                    chunk,
+                    obs.get_timestep(),
+                )
 
-            self.logger.debug(
-                f"Action chunk #{obs.get_timestep()} generated | "
-                f"Inference time: {inference_time:.2f}s |"
-                f"Serialize time: {serialize_time:.2f}s |"
-                f"Total time: {inference_time + serialize_time:.2f}s"
-            )
+                actions_bytes = pickle.dumps(action_chunk)  # nosec
+                actions = services_pb2.Actions(data=actions_bytes)
 
-            time.sleep(
-                max(0, self.config.inference_latency - max(0, time.perf_counter() - getactions_starts))
-            )  # sleep controls inference latency
-
-            return actions
-
+                t_send1 = time.perf_counter()
+                self.logger.info(
+                    f"DUMMY_ACT | obs_step={obs.get_timestep()} bytes={len(actions_bytes)} "
+                    f"build+pickle={(t_send1 - t_send0) * 1000:.2f}ms"
+                )
+                return actions
         except Empty:  # no observation added to queue in obs_queue_timeout
             return services_pb2.Empty()
 
