@@ -1,6 +1,8 @@
 import time
 import pickle  # nosec
 import grpc
+import os
+import json
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -8,11 +10,7 @@ from tqdm import tqdm
 from lerobot.transport import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import grpc_channel_options, send_bytes_in_chunks
 from lerobot.async_inference.helpers import TimedObservation
-local = False
-if local:
-    SERVER = "127.0.0.1:8080"
-else:
-    SERVER = "airtower.utn-mi.de:8000"
+
 ENV_DT = 1.0 / 30.0  # just for channel options; doesn't affect timings
 
 def load_img(path: str, hw=(224, 224)) -> np.ndarray:
@@ -42,12 +40,17 @@ def roundtrip_once(stub, payload, step: int) -> float:
     t1 = time.perf_counter()
     return t1 - t0
 
-def main():
+def benchmark(image_folder_path, image_size=(224, 224, 3), local=True, runs=1000, port=8000):
     # Build payload once (fixed images like your OpenPI test)
-    size = (224, 224)
-    #size = (720, 1280)
-    side_image = load_img("//hdd_data/juelg/viral/side_observer_30.png", size)
-    wrist_image = load_img("//hdd_data/juelg/viral/side_right_30.png", size)
+    if local == True:
+        SERVER = f"0.0.0.0:{port}"
+    else:
+        #SERVER = f"airtower.utn-mi.de:{port}"
+        SERVER = f"multihead.utn-mi.de:{port}"
+    side_image_path = f"{image_folder_path}/side_observer_30.png"
+    wrist_image_path = f"{image_folder_path}/side_right_30.png"
+    side_image = load_img(side_image_path, image_size)
+    wrist_image = load_img(wrist_image_path, image_size)
 
     payload = {
         "images": {
@@ -67,15 +70,47 @@ def main():
     stub.Ready(services_pb2.Empty())
 
     times = []
-    for i in tqdm(range(1000)):
+    for i in tqdm(range(runs)):
         dt = roundtrip_once(stub, payload, i)
         times.append(dt)
 
     channel.close()
-    print("Results over 1000 runs:")
-    print("size:", size)
-    print("on same machine" , local)
-    print("avg:", sum(times) / len(times), "min:", min(times), "max:", max(times))
-    print("standard deviation:", np.std(np.array(times)))
+    avg_time = sum(times) / runs
+    max_time = max(times)
+    min_time = min(times)
+    std_dev = np.std(np.array(times))
+    results = {
+        
+        "average_time": avg_time,
+        "max_time": max_time,
+        "min_time": min_time,
+        "std_dev": std_dev,
+        "times": times,
+    }
+
+
+    return results
+
+
 if __name__ == "__main__":
-    main()
+    on_same_machine = False
+    port = 8000
+    #image_size = (224, 224)
+    image_size = (720, 1280)
+
+    runs = 1000
+    model = "lerobot"
+    image_folder_path = "/home/gamal/vlagent_benchmark/imgs"
+    output_folder_path = f"/home/gamal/vlagent_benchmark/outputs/{model}"
+    results = benchmark(image_folder_path, image_size=image_size, local=on_same_machine, runs=runs, port=port)
+    print(model, "benchmark results:")
+    print(f"Results over {runs} runs:")
+    print("size:", image_size)
+    print("on same machine" , on_same_machine)
+    print("avg:", results["average_time"], "min:", results["min_time"], "max:", results["max_time"])
+    print("standard deviation:", results["std_dev"])
+    os.makedirs(output_folder_path, exist_ok=True)
+    json_path = f"{output_folder_path}/benchmark_results_{model}_{'local' if on_same_machine else 'remote'}_{image_size[0]}x{image_size[1]}.json"
+    with open(json_path, "w") as f:
+        json.dump(results, f, indent=4)
+    print(f"Benchmark results saved to {json_path}")
