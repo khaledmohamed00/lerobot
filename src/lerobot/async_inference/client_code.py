@@ -10,7 +10,6 @@ from tqdm import tqdm
 from lerobot.transport import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import grpc_channel_options, send_bytes_in_chunks
 from lerobot.async_inference.helpers import TimedObservation
-
 ENV_DT = 1.0 / 30.0  # just for channel options; doesn't affect timings
 
 def load_img(path: str, hw=(224, 224)) -> np.ndarray:
