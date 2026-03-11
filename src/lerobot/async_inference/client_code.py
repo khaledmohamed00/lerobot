@@ -111,8 +111,11 @@ if __name__ == "__main__":
 
     runs = 1000
     model = "lerobot"
-    image_folder_path = "/home/gamal/vlagent_benchmark/imgs"
-    output_folder_path = f"/home/gamal/vlagent_benchmark/outputs/{model}"
+    image_folder_path = args.imgs_folder_path
+    output_folder_path = args.output_folder_path
+    os.makedirs(output_folder_path, exist_ok=True)
+    output_folder_path = os.path.join(output_folder_path, model)
+    os.makedirs(output_folder_path, exist_ok=True)
     for image_size in [(224, 224), (720, 1280)]:
         results = benchmark(image_folder_path, image_size=image_size, host=host, runs=runs, port=port)
         print(model, "benchmark results:")
@@ -127,7 +130,6 @@ if __name__ == "__main__":
         results["on_same_machine"] = on_same_machine
         results["image_size"] = image_size
         results["runs"] = runs
-        os.makedirs(output_folder_path, exist_ok=True)
         json_path = f"{output_folder_path}/benchmark_results_{model}_{'local' if on_same_machine else 'remote'}_{image_size[0]}x{image_size[1]}.json"
         with open(json_path, "w") as f:
             json.dump(results, f, indent=4)
