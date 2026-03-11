@@ -39,13 +39,8 @@ def roundtrip_once(stub, payload, step: int) -> float:
     t1 = time.perf_counter()
     return t1 - t0
 
-def benchmark(image_folder_path, image_size=(224, 224, 3), local=True, runs=1000, port=8000):
-    # Build payload once (fixed images like your OpenPI test)
-    if local == True:
-        SERVER = f"0.0.0.0:{port}"
-    else:
-        #SERVER = f"airtower.utn-mi.de:{port}"
-        SERVER = f"multihead.utn-mi.de:{port}"
+def benchmark(image_folder_path, image_size=(224, 224, 3), host="localhost", runs=1000, port=8000):
+
     side_image_path = f"{image_folder_path}/side_observer_30.png"
     wrist_image_path = f"{image_folder_path}/side_right_30.png"
     side_image = load_img(side_image_path, image_size)
@@ -60,7 +55,7 @@ def benchmark(image_folder_path, image_size=(224, 224, 3), local=True, runs=1000
     }
 
     channel = grpc.insecure_channel(
-        SERVER,
+        host,
         grpc_channel_options(initial_backoff=f"{ENV_DT:.4f}s"),
     )
     stub = services_pb2_grpc.AsyncInferenceStub(channel)
@@ -89,18 +84,37 @@ def benchmark(image_folder_path, image_size=(224, 224, 3), local=True, runs=1000
     return results
 
 
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="Client agent for benchmarking")
+    parser.add_argument("--host", type=str, default="multihead.utn-mi.de", help="Host of the server")
+    parser.add_argument("--port", type=int, default=8000, help="Port of the server")
+    parser.add_argument("--on_same_machine", action="store_true", help="Whether the client is running on the same machine as the server")
+    parser.add_argument("--runs", type=int, default=1000, help="Number of runs for the benchmark")
+    parser.add_argument("--imgs_folder_path", type=str, default="/home/gamal/vlagent_benchmark/imgs", help="Path to the folder containing the images for benchmarking")
+    parser.add_argument("--output_folder_path", type=str, default="/home/gamal/vlagent_benchmark/outputs", help="Path to the folder where benchmark results will be saved")
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    on_same_machine = False
-    port = 8000
+    args = parse_args()
+    on_same_machine = args.on_same_machine
+    port = args.port
     #image_size = (224, 224)
     image_size = (720, 1280)
+
+    # Build payload once (fixed images like your OpenPI test)
+    if on_same_machine == True:
+        host = f"0.0.0.0:{port}"
+    else:
+        #SERVER = f"airtower.utn-mi.de:{port}"
+        host = args.host + f":{port}"
 
     runs = 1000
     model = "lerobot"
     image_folder_path = "/home/gamal/vlagent_benchmark/imgs"
     output_folder_path = f"/home/gamal/vlagent_benchmark/outputs/{model}"
     for image_size in [(224, 224), (720, 1280)]:
-        results = benchmark(image_folder_path, image_size=image_size, local=on_same_machine, runs=runs, port=port)
+        results = benchmark(image_folder_path, image_size=image_size, host=host, runs=runs, port=port)
         print(model, "benchmark results:")
         print(f"runs: {runs} ")
         print("size:", image_size)
@@ -119,3 +133,12 @@ if __name__ == "__main__":
             json.dump(results, f, indent=4)
         print(f"Benchmark results saved to {json_path}")
         time.sleep(5)  # to avoid overloading the server
+
+# Example usage:
+# For local testing (client and server on the same machine):
+# python lerobot/src/lerobot/async_inference/client_code.py --on_same_machine --runs 1000 --port 8000 --imgs_folder_path /home/gamal/vlagent_benchmark/imgs --output_folder_path /home/gamal/vlagent_benchmark/outputs
+# For remote testing (client and server on different machines):
+# python lerobot/src/lerobot/async_inference/client_code.py --host multihead.utn-mi.de --port 8000 --runs 1000 --imgs_folder_path /home/gamal/vlagent_benchmark/imgs --output_folder_path /home/gamal/vlagent_benchmark/outputs
+
+# Server command (run on the server machine):
+# python -m lerobot.async_inference.policy_server_dummy --host=0.0.0.0 --port=8000 --fps=30 --inference_latency=0.0 --obs_queue_timeout=1 --dummy_actions=true --dummy_action_dim=7 --dummy_actions_per_chunk=50
