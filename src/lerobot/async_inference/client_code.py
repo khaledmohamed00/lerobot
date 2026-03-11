@@ -80,14 +80,12 @@ def benchmark(image_folder_path, image_size=(224, 224, 3), local=True, runs=1000
     std_dev = np.std(np.array(times))
     results = {
         
-        "average_time": avg_time,
-        "max_time": max_time,
-        "min_time": min_time,
-        "std_dev": std_dev,
+        "avg": avg_time,
+        "max": max_time,
+        "min": min_time,
+        "std": std_dev,
         "times": times,
     }
-
-
     return results
 
 
@@ -101,15 +99,23 @@ if __name__ == "__main__":
     model = "lerobot"
     image_folder_path = "/home/gamal/vlagent_benchmark/imgs"
     output_folder_path = f"/home/gamal/vlagent_benchmark/outputs/{model}"
-    results = benchmark(image_folder_path, image_size=image_size, local=on_same_machine, runs=runs, port=port)
-    print(model, "benchmark results:")
-    print(f"Results over {runs} runs:")
-    print("size:", image_size)
-    print("on same machine" , on_same_machine)
-    print("avg:", results["average_time"], "min:", results["min_time"], "max:", results["max_time"])
-    print("standard deviation:", results["std_dev"])
-    os.makedirs(output_folder_path, exist_ok=True)
-    json_path = f"{output_folder_path}/benchmark_results_{model}_{'local' if on_same_machine else 'remote'}_{image_size[0]}x{image_size[1]}.json"
-    with open(json_path, "w") as f:
-        json.dump(results, f, indent=4)
-    print(f"Benchmark results saved to {json_path}")
+    for image_size in [(224, 224), (720, 1280)]:
+        results = benchmark(image_folder_path, image_size=image_size, local=on_same_machine, runs=runs, port=port)
+        print(model, "benchmark results:")
+        print(f"runs: {runs} ")
+        print("size:", image_size)
+        print("on same machine" , on_same_machine)
+        print("avg:", results["avg"])
+        print("min:", results["min"])
+        print("max:", results["max"])
+        print("std:", results["std"])
+        results["model"] = model
+        results["on_same_machine"] = on_same_machine
+        results["image_size"] = image_size
+        results["runs"] = runs
+        os.makedirs(output_folder_path, exist_ok=True)
+        json_path = f"{output_folder_path}/benchmark_results_{model}_{'local' if on_same_machine else 'remote'}_{image_size[0]}x{image_size[1]}.json"
+        with open(json_path, "w") as f:
+            json.dump(results, f, indent=4)
+        print(f"Benchmark results saved to {json_path}")
+        time.sleep(5)  # to avoid overloading the server
