@@ -133,7 +133,8 @@ class LeRobotPolicy(PolicyInterface):
                 self.device = "cpu"
         self.cfg.device = self.device
         self.cfg.policy.device = self.device
-
+        # Mask specifying which dimensions are relative deltas
+        self.ABSOLUTE_ACTION_MASK = np.array([True, True, True, True, True, True, False])
         self.policy = self._init_policy("Policy")
 
         # Create preprocessor/postprocessor
@@ -225,30 +226,71 @@ class LeRobotPolicy(PolicyInterface):
             logging.warning("Continuing without torch.compile")
         return policy
 
-    def absolute_action_from_relative(self, relative_action: np.ndarray, obs: dict[str, torch.Tensor]) -> np.ndarray:
-        """Convert relative action to absolute action using the current observation.
-
-        Args:
-            relative_action: The relative action predicted by the policy (shape: [action_dim])
-            obs: The current observation containing the robot state (including joint positions)
-
-        Returns:
-            Absolute action (shape: [action_dim])
+    def absolute_action_from_relative(
+        self,
+        relative_action: np.ndarray,
+        obs: dict[str, torch.Tensor],
+    ) -> np.ndarray:
         """
-        # if relative_action is of shape [action_dim], we need to add batch dimension to make it [1, action_dim]
+        Convert relative actions predicted by the policy into absolute actions
+        using the current robot state.
+
+        The PI0 policy predicts relative deltas for some joints. Following the
+        original JAX `AbsoluteActions` postprocessing, only a subset of the action
+        dimensions are converted from relative → absolute using the current
+        observation state.
+
+        Specifically:
+            - The first 7 action dimensions correspond to joint-related values.
+            - A mask determines which of these dimensions are interpreted as
+            relative deltas and therefore require conversion to absolute values.
+            - The remaining dimensions (e.g., gripper control) are left unchanged.
+
+        Absolute conversion is performed as:
+            absolute_action = current_state + relative_delta
+
+        Args
+        ----
+        relative_action : np.ndarray
+            Relative action predicted by the policy.
+            Shape:
+                - (action_dim,) or
+                - (T, action_dim) for an action chunk.
+
+        obs : dict[str, torch.Tensor]
+            Current observation dictionary containing the robot state under
+            the key `"observation.state"`.
+
+        Returns
+        -------
+        np.ndarray
+            Absolute action chunk with shape (T, action_dim).
+        """
+
+        # Ensure actions are 2D: (T, action_dim)
         if relative_action.ndim == 1:
             relative_action = relative_action[None, :]
-        # Assuming the first 7 dimensions of the state are joint positions
-        if obs["observation.state"].ndim == 2 and obs["observation.state"].shape[0] == 1:
-            current_joints = obs["observation.state"][:, :7].cpu().numpy()  # shape: [7]
-        else: 
-            current_joints = obs["observation.state"][:7].cpu().numpy()  # shape: [7]
-        absolute_action = current_joints + relative_action[:, :7]  # shape: [50, 7]
-        # For the gripper action, we can directly use the predicted value (open/close)
-        gripper_action = relative_action[:, 7]  # shape: [50]
 
-        return np.concatenate([absolute_action, gripper_action[:, None]], axis=1)  # shape: [50, 8]
+        state_tensor = obs["observation.state"]
 
+        # Extract current joint state (first 7 dims)
+        if state_tensor.ndim == 2:
+            current_joints = state_tensor[0, :7].cpu().numpy()
+        else:
+            current_joints = state_tensor[:7].cpu().numpy()
+
+        # Copy first 7 dims and apply relative→absolute transform where masked
+        absolute_part = relative_action[:, :7].copy()
+        absolute_part[:, self.ABSOLUTE_ACTION_MASK] += current_joints[self.ABSOLUTE_ACTION_MASK]
+
+        # Gripper action (dimension 7) is used directly
+        gripper_action = relative_action[:, 7:8]
+
+        # Concatenate joint actions and gripper action
+        absolute_action = np.concatenate([absolute_part, gripper_action], axis=1)
+
+        return absolute_action
+    
     def infer(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None, inference_delay: int=4) -> Tuple[np.ndarray, np.ndarray]:
         """Run inference with RTC enabled policy.
 
