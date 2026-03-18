@@ -291,7 +291,10 @@ class LeRobotPolicy(PolicyInterface):
 
         return absolute_action
     
-    def infer(self, obs: dict[str, torch.Tensor], prev_chunk_left_over: torch.Tensor | None, inference_delay: int=4) -> Tuple[np.ndarray, np.ndarray]:
+    def infer(self, obs: dict[str, torch.Tensor],
+              prev_chunk_left_over: torch.Tensor | None,
+              inference_delay: int=4,
+              execution_horizon: int =10) -> Tuple[np.ndarray, np.ndarray]:
         """Run inference with RTC enabled policy.
 
         Args:
@@ -320,6 +323,8 @@ class LeRobotPolicy(PolicyInterface):
                     preprocessed_obs,
                     inference_delay=inference_delay,
                     prev_chunk_left_over=prev_chunk_left_over,
+                    execution_horizon= execution_horizon
+                    
                 )
             else:
                 original_actions = self.policy.predict_action_chunk(preprocessed_obs)
